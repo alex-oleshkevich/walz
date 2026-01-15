@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:v2.tauri.app)",
+      "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:www.angularfix.com)",
+      "Bash(convert:*)",
+      "Bash(npm install:*)",
+      "Bash(cargo check:*)",
+      "Bash(pgrep:*)",
+      "Bash(npm run build:*)",
+      "Bash(cargo search:*)",
+      "Bash(cargo build:*)"
+    ]
+  }
+}

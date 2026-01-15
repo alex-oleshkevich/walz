@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Walz",
+  "version": "0.1.0",
+  "identifier": "io.github.walz",
+  "build": {
+    "beforeDevCommand": "",
+    "devUrl": "https://web.whatsapp.com",
+    "beforeBuildCommand": "",
+    "frontendDist": "https://web.whatsapp.com"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "trayIcon": {
+      "iconPath": "icons/tray-icon.png",
+      "iconAsTemplate": false
+    },
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "icon": [
+      "icons/icon.png",
+      "icons/256x256.png",
+      "icons/128x128.png",
+      "icons/64x64.png",
+      "icons/32x32.png"
+    ],
+    "targets": ["deb"]
+  }
+}

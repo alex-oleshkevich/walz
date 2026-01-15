@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Walz
+Comment=WhatsApp desktop client for Linux
+Exec=walz
+Icon=walz
+Terminal=false
+Type=Application
+Categories=Network;InstantMessaging;Chat;
+StartupWMClass=walz
+Keywords=whatsapp;chat;messaging;
