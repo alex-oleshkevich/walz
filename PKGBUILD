@@ -1,26 +1,26 @@
-# Maintainer: Your Name <your.email@example.com>
+# Maintainer: Alex Oleshkevich <alex.oleshkevich@gmail.com>
 pkgname=walz
 pkgver=0.1.0
-pkgrel=1
+pkgrel=4
 pkgdesc="WhatsApp desktop client for Linux built with Tauri"
 arch=('x86_64')
-url="https://github.com/user/walz"
+url="https://github.com/alex-oleshkevich/walz"
 license=('MIT')
 depends=(
     'webkit2gtk-4.1'
+    'gst-plugins-good'
     'gtk3'
     'libayatana-appindicator'
 )
 makedepends=(
     'rust'
     'cargo'
-    'nodejs'
-    'npm'
 )
 
 build() {
     cd "$startdir"
-    npm install
+    # The Tauri CLI is never invoked here (we install the bare binary below), so
+    # there is no npm/node step and no bundling.
     cargo build --release --manifest-path src-tauri/Cargo.toml
 }
 

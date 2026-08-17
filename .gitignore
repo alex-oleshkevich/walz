@@ -6,9 +6,12 @@ dist/
 src-tauri/target/
 
 # Arch Linux packaging
+# Note: no source=() array is used in PKGBUILD, so makepkg's scratch srcdir
+# (which defaults to ./src) stays empty and untracked regardless -- it must not
+# be ignored here, since that path collides with the real src/ and
+# src-tauri/src/ source trees.
 *.pkg.tar.zst
 pkg/
-src/
 
 # IDE
 .idea/
@@ -18,3 +21,9 @@ src/
 
 # OS
 .DS_Store
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/

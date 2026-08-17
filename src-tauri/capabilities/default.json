@@ -18,16 +18,11 @@
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
     "notification:allow-notify",
-    "dialog:default",
-    "dialog:allow-open",
-    "dialog:allow-save",
     "window-state:default",
     "window-state:allow-restore-state",
-    "window-state:allow-save-window-state",
-    "shell:default",
-    "shell:allow-open"
+    "window-state:allow-save-window-state"
   ],
   "remote": {
-    "urls": ["https://web.whatsapp.com/*", "https://*.whatsapp.net/*", "https://*.whatsapp.com/*"]
+    "urls": ["https://web.whatsapp.com/*"]
   }
 }
