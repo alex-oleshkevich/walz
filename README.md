@@ -6,7 +6,7 @@ own: a tray icon with an unread badge, native desktop notifications, MPRIS
 media controls for voice messages, Do Not Disturb, and multiple isolated
 profiles.
 
-![Walz login screen](docs/screenshot-login.png)
+![Walz showing a WhatsApp chat list in a native window](docs/screenshot-chats.png)
 
 ## Features
 
