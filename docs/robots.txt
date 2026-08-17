@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://alex-oleshkevich.github.io/walz/sitemap.xml

@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Walz — WhatsApp desktop client for Linux</title>
+<meta name="description" content="Walz is a native WhatsApp desktop client for Linux built with Tauri and Rust. Tray icon with unread badge, native notifications, Do Not Disturb, MPRIS media keys, and isolated profiles.">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://alex-oleshkevich.github.io/walz/">
+<link rel="icon" type="image/png" href="favicon.png">
+<meta name="theme-color" content="#0c1210">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Walz">
+<meta property="og:title" content="Walz — WhatsApp desktop client for Linux">
+<meta property="og:description" content="A native Tauri client that wraps WhatsApp Web with a tray icon, real notifications, MPRIS media keys, and isolated profiles.">
+<meta property="og:url" content="https://alex-oleshkevich.github.io/walz/">
+<meta property="og:image" content="https://alex-oleshkevich.github.io/walz/screenshot-login.png">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Walz — WhatsApp desktop client for Linux">
+<meta name="twitter:description" content="A native Tauri client that wraps WhatsApp Web with a tray icon, real notifications, MPRIS media keys, and isolated profiles.">
+<meta name="twitter:image" content="https://alex-oleshkevich.github.io/walz/screenshot-login.png">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Walz",
+  "url": "https://alex-oleshkevich.github.io/walz/",
+  "description": "A native WhatsApp desktop client for Linux built with Tauri and Rust, with a tray icon, native notifications, MPRIS media keys, and isolated profiles.",
+  "applicationCategory": "CommunicationApplication",
+  "operatingSystem": "Linux",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "license": "https://opensource.org/licenses/MIT",
+  "downloadUrl": "https://github.com/alex-oleshkevich/walz/releases/latest",
+  "codeRepository": "https://github.com/alex-oleshkevich/walz"
+}
+</script>
+<style>
+  :root {
+    --ink: #0c1210;
+    --ink-2: #121a17;
+    --panel: #101815;
+    --line: #223029;
+    --paper: #eef1ea;
+    --muted: #8ea095;
+    --muted-2: #5f6f66;
+    --green: #25d366;
+    --green-dim: #1a9c4a;
+    --amber: #e8a33d;
+    --mono: ui-monospace, "JetBrains Mono", "Fira Code", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --radius: 5px;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: var(--sans);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  img { max-width: 100%; display: block; }
+  a { color: inherit; }
+  code, pre { font-family: var(--mono); }
+
+  :focus-visible {
+    outline: 2px solid var(--green);
+    outline-offset: 2px;
+  }
+
+  .wrap {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* status bar */
+  .statusbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: rgba(12, 18, 16, 0.88);
+    backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--line);
+  }
+  .statusbar-inner {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 0 24px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  .statusbar-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    color: var(--paper);
+  }
+  .statusbar-dots { display: flex; gap: 5px; }
+  .statusbar-dots span {
+    width: 6px; height: 6px; border-radius: 1px;
+    background: var(--muted-2);
+  }
+  .statusbar-dots span:first-child { background: var(--green); }
+  .statusbar-links { display: flex; gap: 20px; }
+  .statusbar-links a {
+    text-decoration: none;
+    color: var(--muted);
+    transition: color .15s ease;
+  }
+  .statusbar-links a:hover { color: var(--paper); }
+
+  /* hero */
+  .hero {
+    padding: 88px 0 64px;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--green);
+    margin: 0 0 18px;
+    letter-spacing: 0.02em;
+  }
+  h1 {
+    font-size: clamp(34px, 5vw, 54px);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    margin: 0 0 22px;
+    max-width: 16ch;
+    font-weight: 650;
+  }
+  .lede {
+    font-size: clamp(16px, 2vw, 19px);
+    color: var(--muted);
+    max-width: 52ch;
+    margin: 0 0 36px;
+  }
+  .lede code { color: var(--paper); background: var(--panel); padding: 1px 6px; border-radius: 3px; font-size: 0.9em; }
+
+  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 56px; }
+  .btn {
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    padding: 11px 18px;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .btn-primary { background: var(--green); color: #06210f; font-weight: 600; }
+  .btn-primary:hover { background: #33dd73; }
+  .btn-ghost { border-color: var(--line); color: var(--paper); background: transparent; }
+  .btn-ghost:hover { border-color: var(--muted-2); }
+
+  /* terminal */
+  .terminal {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    max-width: 720px;
+  }
+  .terminal-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted-2);
+  }
+  .terminal-body {
+    padding: 18px 20px 22px;
+    font-family: var(--mono);
+    font-size: 13.5px;
+    line-height: 1.7;
+    min-height: 168px;
+  }
+  .t-prompt { color: var(--green); }
+  .t-out { color: var(--muted); }
+  .t-cursor {
+    display: inline-block;
+    width: 7px;
+    height: 15px;
+    background: var(--green);
+    vertical-align: text-bottom;
+    margin-left: 2px;
+    animation: blink 1s step-end infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .t-cursor { animation: none; }
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* sections */
+  section { padding: 64px 0; border-top: 1px solid var(--line); }
+  h2 {
+    font-size: clamp(22px, 3vw, 28px);
+    letter-spacing: -0.01em;
+    margin: 0 0 8px;
+  }
+  .section-intro { color: var(--muted); max-width: 60ch; margin: 0 0 40px; }
+
+  /* screenshot */
+  .frame {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--panel);
+    max-width: 620px;
+  }
+  .frame-bar {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted-2);
+    text-align: center;
+  }
+  .frame img { width: 100%; }
+
+  /* feature grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .card {
+    background: var(--ink);
+    padding: 24px;
+  }
+  .card-tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--amber);
+    margin-bottom: 14px;
+  }
+  .card h3 { font-size: 16px; margin: 0 0 8px; font-weight: 600; }
+  .card p { font-size: 14px; color: var(--muted); margin: 0; }
+
+  /* install */
+  .tabs { display: flex; gap: 4px; margin-bottom: 0; }
+  .tab {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: transparent;
+    border: 1px solid var(--line);
+    border-bottom: none;
+    color: var(--muted);
+    padding: 9px 16px;
+    border-radius: var(--radius) var(--radius) 0 0;
+    cursor: pointer;
+  }
+  .tab[aria-selected="true"] { color: var(--paper); background: var(--panel); }
+  .tabpanels {
+    border: 1px solid var(--line);
+    border-radius: 0 var(--radius) var(--radius) var(--radius);
+    background: var(--panel);
+  }
+  .tabpanel { display: none; padding: 20px; }
+  .tabpanel.active { display: block; }
+  .tabpanel pre {
+    margin: 0;
+    font-size: 13.5px;
+    color: var(--paper);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .tabpanel p { color: var(--muted); font-size: 13.5px; margin: 12px 0 0; }
+  .copy-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .copy-btn {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    border-radius: 3px;
+    padding: 5px 10px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .copy-btn:hover { color: var(--paper); border-color: var(--muted-2); }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 32px 0 48px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--muted-2);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  footer a { color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--paper); }
+
+  @media (max-width: 760px) {
+    .grid { grid-template-columns: 1fr; }
+    .statusbar-links { gap: 14px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="statusbar">
+  <div class="statusbar-inner">
+    <a href="#" class="statusbar-brand">
+      <span class="statusbar-dots"><span></span><span></span><span></span></span>
+      walz
+    </a>
+    <div class="statusbar-links">
+      <a href="#install">install</a>
+      <a href="#features">features</a>
+      <a href="https://github.com/alex-oleshkevich/walz">github ↗</a>
+    </div>
+  </div>
+</div>
+
+<main class="wrap">
+  <section class="hero" style="border-top:none; padding-top:88px;">
+    <p class="eyebrow"># a native tauri client</p>
+    <h1>WhatsApp, wrapped for the Linux desktop.</h1>
+    <p class="lede">Walz puts WhatsApp Web in a real window with a tray icon, native notifications, and media keys, instead of a browser tab you have to hunt for. Built with Tauri and Rust.</p>
+
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#install">Get the install command</a>
+      <a class="btn btn-ghost" href="https://github.com/alex-oleshkevich/walz">View source</a>
+    </div>
+
+    <div class="terminal" role="img" aria-label="Terminal showing the walz install command and its output">
+      <div class="terminal-bar"><span>sh</span></div>
+      <div class="terminal-body" id="term-body"></div>
+    </div>
+  </section>
+
+  <section id="screenshot">
+    <p class="eyebrow"># what you get</p>
+    <h2>A window, not a tab</h2>
+    <p class="section-intro">Same WhatsApp Web you already know, running as its own application with its own window chrome, icon, and process.</p>
+    <div class="frame">
+      <div class="frame-bar">Walz</div>
+      <img src="screenshot-login.png" alt="Walz running as a native window, showing the WhatsApp Web QR code login screen" loading="lazy">
+    </div>
+  </section>
+
+  <section id="features">
+    <p class="eyebrow"># src-tauri/src</p>
+    <h2>What's actually wired up</h2>
+    <p class="section-intro">Each one is a real module in the source tree, not a marketing claim.</p>
+    <div class="grid">
+      <div class="card">
+        <span class="card-tag">tray.rs</span>
+        <h3>Tray icon and unread badge</h3>
+        <p>See how many chats are waiting without opening the window. Click to show, hide, or quit.</p>
+      </div>
+      <div class="card">
+        <span class="card-tag">commands.rs</span>
+        <h3>Notifications and Do Not Disturb</h3>
+        <p>Click a notification to jump straight to the chat. One toggle mutes everything, including download alerts, and remembers itself across restarts.</p>
+      </div>
+      <div class="card">
+        <span class="card-tag">mpris.rs</span>
+        <h3>Media key controls</h3>
+        <p>Play, pause, and seek voice messages from your keyboard or your desktop's media widget.</p>
+      </div>
+      <div class="card">
+        <span class="card-tag">profile.rs</span>
+        <h3>Separate profiles</h3>
+        <p>Run <code>walz --profile work</code> next to your default session. Each profile gets its own data directory and its own window.</p>
+      </div>
+      <div class="card">
+        <span class="card-tag">injection.js</span>
+        <h3>Paste and drag files in</h3>
+        <p>Images and files copied from your file manager land in the chat box, not just inside the browser sandbox.</p>
+      </div>
+      <div class="card">
+        <span class="card-tag">theme.rs</span>
+        <h3>Follows your system theme</h3>
+        <p>Dark or light, synced from your desktop's own appearance setting.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <p class="eyebrow"># get it running</p>
+    <h2>Install</h2>
+    <p class="section-intro">Pick one. All of them end with a <code>walz</code> binary on your machine.</p>
+
+    <div class="tabs" role="tablist" aria-label="Installation methods">
+      <button class="tab" role="tab" aria-selected="true" aria-controls="panel-curl" id="tab-curl">curl | bash</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="panel-arch" id="tab-arch">Arch Linux</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="panel-source" id="tab-source">From source</button>
+    </div>
+    <div class="tabpanels">
+      <div class="tabpanel active" role="tabpanel" id="panel-curl" aria-labelledby="tab-curl">
+        <div class="copy-row">
+          <pre><code id="code-curl">curl -fsSL https://raw.githubusercontent.com/alex-oleshkevich/walz/master/install.sh | bash</code></pre>
+          <button class="copy-btn" data-copy-target="code-curl">copy</button>
+        </div>
+        <p>Downloads the latest release and installs it to <code>~/.local/bin</code>. No <code>sudo</code>. Linux x86_64 only for now.</p>
+      </div>
+      <div class="tabpanel" role="tabpanel" id="panel-arch" aria-labelledby="tab-arch" hidden>
+        <div class="copy-row">
+          <pre><code id="code-arch">git clone https://github.com/alex-oleshkevich/walz.git
+cd walz
+makepkg -si</code></pre>
+          <button class="copy-btn" data-copy-target="code-arch">copy</button>
+        </div>
+        <p>Builds from the <code>PKGBUILD</code> in this repository. Not on the AUR yet.</p>
+      </div>
+      <div class="tabpanel" role="tabpanel" id="panel-source" aria-labelledby="tab-source" hidden>
+        <div class="copy-row">
+          <pre><code id="code-source">git clone https://github.com/alex-oleshkevich/walz.git
+cd walz
+npm install
+npm run tauri build</code></pre>
+          <button class="copy-btn" data-copy-target="code-source">copy</button>
+        </div>
+        <p>Needs Rust, Node.js, and webkit2gtk-4.1.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  <span>MIT licensed</span>
+  <span><a href="https://github.com/alex-oleshkevich/walz">github.com/alex-oleshkevich/walz</a> · built with Tauri + Rust</span>
+</footer>
+
+<script>
+  // Tabs
+  var tabs = document.querySelectorAll('[role="tab"]');
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      tabs.forEach(function (t) {
+        t.setAttribute('aria-selected', 'false');
+        document.getElementById(t.getAttribute('aria-controls')).hidden = true;
+        document.getElementById(t.getAttribute('aria-controls')).classList.remove('active');
+      });
+      tab.setAttribute('aria-selected', 'true');
+      var panel = document.getElementById(tab.getAttribute('aria-controls'));
+      panel.hidden = false;
+      panel.classList.add('active');
+    });
+  });
+
+  // Copy buttons
+  document.querySelectorAll('.copy-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var text = document.getElementById(btn.getAttribute('data-copy-target')).textContent;
+      navigator.clipboard.writeText(text).then(function () {
+        var original = btn.textContent;
+        btn.textContent = 'copied';
+        setTimeout(function () { btn.textContent = original; }, 1400);
+      });
+    });
+  });
+
+  // Hero terminal transcript, typed if motion is allowed, shown instantly otherwise.
+  var lines = [
+    { type: 'prompt', text: 'curl -fsSL install.walz.sh | bash' },
+    { type: 'out', text: 'Downloading walz-x86_64-unknown-linux-gnu.tar.gz...' },
+    { type: 'out', text: 'walz installed to /home/you/.local/bin/walz' },
+    { type: 'prompt', text: 'walz' }
+  ];
+  var body = document.getElementById('term-body');
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function renderStatic() {
+    body.innerHTML = lines.map(function (l) {
+      if (l.type === 'prompt') return '<div><span class="t-prompt">$</span> ' + l.text + '</div>';
+      return '<div class="t-out">' + l.text + '</div>';
+    }).join('') + '<span class="t-cursor"></span>';
+  }
+
+  function typeLines() {
+    var li = 0, ci = 0;
+    var current = document.createElement('div');
+    body.appendChild(current);
+
+    function step() {
+      var line = lines[li];
+      if (!line) {
+        body.appendChild(Object.assign(document.createElement('span'), { className: 't-cursor' }));
+        return;
+      }
+      if (ci === 0 && line.type === 'prompt') {
+        current.innerHTML = '<span class="t-prompt">$</span> ';
+      }
+      if (line.type === 'out' && ci === 0) {
+        current.className = 't-out';
+      }
+      current.innerHTML = (line.type === 'prompt' ? '<span class="t-prompt">$</span> ' : '') + line.text.slice(0, ci);
+      ci++;
+      if (ci <= line.text.length) {
+        setTimeout(step, line.type === 'prompt' ? 28 : 4);
+      } else {
+        li++;
+        ci = 0;
+        current = document.createElement('div');
+        body.appendChild(current);
+        setTimeout(step, line.type === 'prompt' ? 260 : 140);
+      }
+    }
+    step();
+  }
+
+  if (reduced) {
+    renderStatic();
+  } else {
+    typeLines();
+  }
+</script>
+
+</body>
+</html>
