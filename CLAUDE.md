@@ -26,6 +26,9 @@ makepkg -si                    # Build and install from PKGBUILD
 **Rust Backend** (`src-tauri/src/`):
 - `lib.rs` - App setup: WebviewBuilder with external URL, plugins, download handler, drag-drop support, MPRIS server spawn
 - `commands.rs` - Tauri IPC commands exposed to frontend (notifications, theme, badge, zoom, DND, secrets)
+- `downloads.rs` - Download staging, save dialog, and the "ask where to save" toggle
+- `links.rs` - Translates `whatsapp:`/`wa.me` click-to-chat links into web.whatsapp.com URLs
+- `desktop_dnd.rs` - Mirrors the desktop's own Do Not Disturb switch (Plasma `Inhibited`, GNOME `show-banners`)
 - `profile.rs` - Multi-profile support via `--profile <name>` CLI flag, manages separate data/config directories per profile
 - `tray.rs` - System tray with context menu (show/hide, DND, zoom, quit), badge tooltip updates
 - `theme.rs` - D-Bus XDG Portal query for system dark mode (`org.freedesktop.portal.Settings`)
@@ -50,10 +53,12 @@ makepkg -si                    # Build and install from PKGBUILD
 
 **Linux-only Code**: Gate with `#[cfg(target_os = "linux")]` for MPRIS, secrets, and D-Bus features
 
+**URL Handling**: `walz <url>` opens a click-to-chat link; a second launch forwards it to the running instance over the single-instance socket, and `walz.desktop` claims `x-scheme-handler/whatsapp`
+
 ## Configuration
 
 - **Data**: `~/.local/share/walz/` (WebKit data, session)
-- **Config**: `~/.config/walz/` (custom.css, zoom)
+- **Config**: `~/.config/walz/` (custom.css, zoom, dnd, ask-download-location, follow-desktop-dnd)
 - **Profiles**: `~/.local/share/walz/profiles/<name>/` and `~/.config/walz/profiles/<name>/`
 
 ## User Agent

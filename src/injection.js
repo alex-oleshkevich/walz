@@ -418,6 +418,40 @@
     setupTitleObserver();
     loadCustomCSS();
     loadZoom();
+    openPendingLink();
+  }
+
+  // WhatsApp Web routes /send and /accept itself, so a click-to-chat link is a
+  // plain navigation. This reloads the app, which is why it only ever runs for
+  // an explicit user action.
+  function navigateTo(url) {
+    if (typeof url === "string" && url.startsWith("https://web.whatsapp.com/")) {
+      window.location.href = url;
+    }
+  }
+
+  // A link passed on the command line is waiting in Rust before any listener
+  // exists, so it has to be pulled rather than pushed.
+  function openPendingLink() {
+    window.__TAURI__.core
+      .invoke("take_pending_link")
+      .then((url) => {
+        if (url) navigateTo(url);
+      })
+      .catch(() => {});
+  }
+
+  // The composer only exists once a chat is open, and openChat clicks through
+  // the chat list, so give the pane a few frames to appear.
+  function focusComposer(attempt = 0) {
+    const composer = document.querySelector('footer [contenteditable="true"]');
+    if (composer) {
+      composer.focus();
+      return;
+    }
+    if (attempt < 20) {
+      setTimeout(() => focusComposer(attempt + 1), 100);
+    }
   }
 
   function setupDownloadInterceptor() {
@@ -482,6 +516,19 @@
 
     window.__TAURI__.event.listen("notification-clicked", (e) => {
       openChat(e.payload);
+    });
+
+    // The Reply action opens the chat and puts the caret in the composer, so the
+    // notification leads straight into typing.
+    window.__TAURI__.event.listen("notification-reply", (e) => {
+      openChat(e.payload);
+      focusComposer();
+    });
+
+    // A link handed over by a later `walz whatsapp://...` launch. The page is
+    // already up, so navigate right away.
+    window.__TAURI__.event.listen("open-url", (e) => {
+      navigateTo(e.payload);
     });
 
     window.__TAURI__.event.listen("mpris-play", mprisPlay);

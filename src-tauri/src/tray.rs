@@ -92,6 +92,16 @@ fn build_menu<M: Manager<tauri::Wry>>(app: &M) -> Result<Menu<tauri::Wry>, tauri
         crate::downloads::ASK_LOCATION.load(Ordering::Relaxed),
         None::<&str>,
     )?;
+    #[cfg(target_os = "linux")]
+    let follow_dnd = CheckMenuItem::with_id(
+        app,
+        "follow-desktop-dnd",
+        "Follow system Do Not Disturb",
+        // Greyed out when the desktop publishes no DND state to follow.
+        crate::desktop_dnd::available(),
+        crate::desktop_dnd::FOLLOW.load(Ordering::Relaxed),
+        None::<&str>,
+    )?;
     let sep2 = PredefinedMenuItem::separator(app)?;
 
     // Built with the `devtools` cargo feature so this works in release builds
@@ -108,6 +118,8 @@ fn build_menu<M: Manager<tauri::Wry>>(app: &M) -> Result<Menu<tauri::Wry>, tauri
             &hide,
             &sep1,
             &dnd,
+            #[cfg(target_os = "linux")]
+            &follow_dnd,
             &ask_download,
             &sep2,
             &devtools,
@@ -149,6 +161,10 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
         }
         "ask-download-location" => {
             crate::downloads::toggle_ask_location(app);
+        }
+        #[cfg(target_os = "linux")]
+        "follow-desktop-dnd" => {
+            crate::desktop_dnd::toggle_follow(app);
         }
         "devtools" => {
             if let Some(window) = app.get_webview_window("main") {

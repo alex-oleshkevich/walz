@@ -20,6 +20,7 @@ use std::path::Path;
 use tauri::AppHandle;
 
 const WAKE: &[u8] = b"walz-show";
+const MAX_MESSAGE: u64 = 8 * 1024;
 
 pub enum Instance {
     /// This process owns the profile. Hold the listener for the app's lifetime;
@@ -38,7 +39,9 @@ fn socket_name(data_dir: &Path) -> String {
     format!("walz-{:016x}", hasher.finish())
 }
 
-pub fn acquire(data_dir: &Path) -> Instance {
+/// A later launch may carry a link to open, so the wake-up is a prefix rather
+/// than the whole message: `WAKE` optionally followed by the URL.
+pub fn acquire(data_dir: &Path, url: Option<&str>) -> Instance {
     let name = socket_name(data_dir);
     let Ok(addr) = SocketAddr::from_abstract_name(name.as_bytes()) else {
         // Cannot even name the socket; prefer starting over refusing to start.
@@ -51,6 +54,9 @@ pub fn acquire(data_dir: &Path) -> Instance {
             // The incumbent answered: hand off and let this process exit.
             Ok(mut stream) => {
                 let _ = stream.write_all(WAKE);
+                if let Some(url) = url {
+                    let _ = stream.write_all(url.as_bytes());
+                }
                 let _ = stream.flush();
                 Instance::AlreadyRunning
             }
@@ -66,11 +72,22 @@ pub fn acquire(data_dir: &Path) -> Instance {
 pub fn serve(listener: UnixListener, app: AppHandle) {
     std::thread::spawn(move || {
         for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { continue };
-            let mut buf = [0u8; WAKE.len()];
-            if stream.read_exact(&mut buf).is_ok() && buf == WAKE {
-                crate::tray::show_main_window(&app);
+            let Ok(stream) = stream else { continue };
+
+            // Cap the read: the peer is another walz, but a stuck or hostile
+            // writer should not be able to grow this buffer without bound.
+            let mut message = Vec::new();
+            if stream.take(MAX_MESSAGE).read_to_end(&mut message).is_err() {
+                continue;
             }
+            let Some(url) = message.strip_prefix(WAKE) else {
+                continue;
+            };
+
+            if let Some(url) = std::str::from_utf8(url).ok().filter(|u| !u.is_empty()) {
+                crate::links::handle(&app, url);
+            }
+            crate::tray::show_main_window(&app);
         }
     });
 }

@@ -5365,6 +5365,7 @@ dependencies = [
  "clap",
  "directories",
  "dirs 5.0.1",
+ "gio",
  "image",
  "mime_guess",
  "mpris-server",

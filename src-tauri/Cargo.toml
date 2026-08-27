@@ -30,6 +30,7 @@ mpris-server = "0.8"
 secret-service = { version = "4", features = ["rt-tokio-crypto-rust"] }
 tokio = { version = "1", features = ["rt", "sync"] }
 notify-rust = "4"
+gio = "0.18"
 
 [profile.release]
 strip = false

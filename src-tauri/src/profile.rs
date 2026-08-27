@@ -18,6 +18,10 @@ pub struct Args {
     /// Start minimized to system tray
     #[arg(short, long)]
     pub minimized: bool,
+
+    /// whatsapp: or wa.me link to open
+    #[arg(value_name = "URL")]
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +83,7 @@ pub fn init() -> &'static Profile {
             std::process::exit(0);
         }
 
+        crate::links::set_launch_url(args.url);
         Profile::new(args.profile, args.minimized)
     })
 }

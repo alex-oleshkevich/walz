@@ -21,6 +21,14 @@ pub struct ClipboardFile {
     pub data: String,
 }
 
+/// The injected script drains this once it is ready to navigate. A link on the
+/// command line arrives long before any event listener exists, so it cannot be
+/// delivered as an event the way a link from a later launch is.
+#[tauri::command]
+pub fn take_pending_link() -> Option<String> {
+    crate::links::take_pending()
+}
+
 #[tauri::command]
 pub fn set_pending_download_name(name: String) {
     *PENDING_DOWNLOAD_NAME.lock().unwrap() = Some(name);
@@ -67,21 +75,26 @@ pub async fn send_notification(
                 .body(&body)
                 .icon(&icon_path.to_string_lossy())
                 .action("default", "Open")
+                .action("reply", "Reply")
                 .show();
 
             if let Ok(handle) = result {
                 handle.wait_for_action(|action| {
-                    if action == "default" || action == "__closed" {
-                        if action == "default" {
-                            if let Some(window) = app_clone.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.unminimize();
-                                let _ = window.set_focus();
-                            }
-                            if let Some(id) = chat_id_clone.as_ref() {
-                                let _ = app_clone.emit("notification-clicked", id.clone());
-                            }
-                        }
+                    // "__closed" arrives when the notification is dismissed; it
+                    // must fall through so the thread stops waiting.
+                    let event = match action {
+                        "default" => "notification-clicked",
+                        "reply" => "notification-reply",
+                        _ => return,
+                    };
+
+                    if let Some(window) = app_clone.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                    }
+                    if let Some(id) = chat_id_clone.as_ref() {
+                        let _ = app_clone.emit(event, id.clone());
                     }
                 });
             }

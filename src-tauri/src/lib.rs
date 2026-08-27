@@ -1,5 +1,8 @@
 mod commands;
+#[cfg(target_os = "linux")]
+mod desktop_dnd;
 mod downloads;
+mod links;
 pub mod profile;
 #[cfg(target_os = "linux")]
 mod secrets;
@@ -42,14 +45,25 @@ pub fn run() {
         downloads::load_ask_location(),
         std::sync::atomic::Ordering::Relaxed,
     );
+    #[cfg(target_os = "linux")]
+    desktop_dnd::FOLLOW.store(
+        desktop_dnd::load_follow(),
+        std::sync::atomic::Ordering::Relaxed,
+    );
 
     // Drop staged files left behind by a crash mid-download.
     downloads::clean_stage_root();
 
+    // A link on the command line has to wait: nothing listens for events until
+    // the injected script runs, so it is parked for the page to collect.
+    if let Some(target) = links::launch_url().and_then(links::to_web_url) {
+        links::set_pending(target);
+    }
+
     // Claim the profile before touching the WebKit data directory: a second
     // instance sharing it can corrupt the stored session.
     #[cfg(target_os = "linux")]
-    let instance_guard = match single_instance::acquire(&data_dir) {
+    let instance_guard = match single_instance::acquire(&data_dir, links::launch_url()) {
         single_instance::Instance::AlreadyRunning => {
             eprintln!(
                 "walz is already running for profile '{}'; raising its window",
@@ -118,6 +132,9 @@ pub fn run() {
             if let Some(listener) = instance_guard {
                 single_instance::serve(listener, handle.clone());
             }
+
+            #[cfg(target_os = "linux")]
+            desktop_dnd::watch(handle.clone());
 
             let window_clone = window.clone();
             let theme_event_handle = handle.clone();
@@ -191,6 +208,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::set_pending_download_name,
+            commands::take_pending_link,
             commands::send_notification,
             commands::get_system_theme,
             commands::update_badge,
