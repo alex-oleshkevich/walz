@@ -80,8 +80,8 @@ pub async fn send_notification(
 
             if let Ok(handle) = result {
                 handle.wait_for_action(|action| {
-                    // "__closed" arrives when the notification is dismissed; it
-                    // must fall through so the thread stops waiting.
+                    // The wait also ends with "__closed" when the notification is
+                    // dismissed rather than acted on; nothing to do then.
                     let event = match action {
                         "default" => "notification-clicked",
                         "reply" => "notification-reply",

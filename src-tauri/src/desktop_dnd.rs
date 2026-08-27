@@ -40,14 +40,12 @@ pub fn toggle_follow(app: &AppHandle) {
     std::fs::create_dir_all(config).ok();
     std::fs::write(follow_path(), enabled.to_string()).ok();
 
-    crate::tray::rebuild_menu(app);
-
     // Adopt the desktop's state immediately rather than at the next poll, so the
-    // menu click has a visible effect.
-    if enabled {
-        if let Some(state) = desktop_state() {
-            crate::commands::set_dnd(app, state);
-        }
+    // menu click has a visible effect. set_dnd rebuilds the menu itself, so only
+    // rebuild by hand when there is no state to adopt.
+    match enabled.then(desktop_state).flatten() {
+        Some(state) => crate::commands::set_dnd(app, state),
+        None => crate::tray::rebuild_menu(app),
     }
 }
 
@@ -83,11 +81,11 @@ fn desktop_state() -> Option<bool> {
     plasma_inhibited().or_else(gnome_dnd)
 }
 
-/// Whether this desktop can be asked at all. Cached: the tray menu is rebuilt on
-/// every toggle and this would otherwise be a D-Bus round trip each time.
+/// Whether this desktop can be asked at all. Read fresh rather than cached: a
+/// notification server that starts after walz would otherwise leave the menu
+/// item greyed out for the rest of the session.
 pub fn available() -> bool {
-    static AVAILABLE: OnceLock<bool> = OnceLock::new();
-    *AVAILABLE.get_or_init(|| desktop_state().is_some())
+    desktop_state().is_some()
 }
 
 /// Plasma publishes `Inhibited` on the notification server itself. Anything else
@@ -107,9 +105,16 @@ fn plasma_inhibited() -> Option<bool> {
         fn inhibited(&self) -> zbus::Result<bool>;
     }
 
+    // One connection for the life of the app: this is polled, and a fresh Hello
+    // handshake every few seconds would be pure churn. Opened outside the
+    // block_on below -- nesting one inside another panics the tokio runtime.
+    static BUS: OnceLock<Option<Connection>> = OnceLock::new();
+    let connection = BUS
+        .get_or_init(|| tauri::async_runtime::block_on(Connection::session()).ok())
+        .as_ref()?;
+
     tauri::async_runtime::block_on(async {
-        let connection = Connection::session().await.ok()?;
-        let proxy = NotificationsProxy::new(&connection).await.ok()?;
+        let proxy = NotificationsProxy::new(connection).await.ok()?;
         proxy.inhibited().await.ok()
     })
 }
@@ -129,7 +134,11 @@ fn gnome_dnd() -> Option<bool> {
     const SCHEMA: &str = "org.gnome.desktop.notifications";
 
     let session = std::env::var("XDG_CURRENT_DESKTOP").ok()?;
-    if !session.to_ascii_uppercase().split(':').any(|d| d == "GNOME") {
+    if !session
+        .to_ascii_uppercase()
+        .split(':')
+        .any(|d| d == "GNOME")
+    {
         return None;
     }
 

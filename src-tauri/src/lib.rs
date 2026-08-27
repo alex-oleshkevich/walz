@@ -51,15 +51,6 @@ pub fn run() {
         std::sync::atomic::Ordering::Relaxed,
     );
 
-    // Drop staged files left behind by a crash mid-download.
-    downloads::clean_stage_root();
-
-    // A link on the command line has to wait: nothing listens for events until
-    // the injected script runs, so it is parked for the page to collect.
-    if let Some(target) = links::launch_url().and_then(links::to_web_url) {
-        links::set_pending(target);
-    }
-
     // Claim the profile before touching the WebKit data directory: a second
     // instance sharing it can corrupt the stored session.
     #[cfg(target_os = "linux")]
@@ -73,6 +64,19 @@ pub fn run() {
         }
         single_instance::Instance::Primary(listener) => listener,
     };
+
+    // Only once this process owns the profile: the staging directory belongs to
+    // whichever instance is running, and a launch that hands off and exits must
+    // not delete a download the incumbent is still waiting on.
+    downloads::clean_stage_root();
+
+    // A link on the command line has to wait: nothing listens for events until
+    // the injected script runs, so it is parked for the page to collect. A
+    // launch that handed off above never gets here -- the incumbent reports on
+    // that link instead.
+    if let Some(url) = links::launch_url() {
+        links::park(url);
+    }
 
     // Opt-in experiment: let WebKit deliver native HTML5 drops straight to
     // WhatsApp's own drop zone instead of routing them through Rust.

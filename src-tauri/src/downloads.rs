@@ -79,6 +79,15 @@ pub fn on_requested(url: &Url, destination: &mut PathBuf) {
     }
 }
 
+/// Where the save dialog opens: the Walz folder if direct-save mode ever created
+/// one, otherwise plain ~/Downloads. Deliberately not created -- asking where to
+/// save should not leave a folder behind that the user never picked.
+fn dialog_dir() -> Option<PathBuf> {
+    let downloads = directories::UserDirs::new()?.download_dir()?.to_path_buf();
+    let walz = downloads.join("Walz");
+    Some(if walz.is_dir() { walz } else { downloads })
+}
+
 pub fn on_finished(app: &AppHandle, path: Option<PathBuf>, success: bool) {
     let Some(path) = path else {
         if success {
@@ -108,9 +117,12 @@ fn prompt_for_location(app: &AppHandle, staged: PathBuf) {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "download".to_string());
 
-    let mut dialog = app.dialog().file().set_title("Save file").set_file_name(&name);
-    if let Some(dir) = default_dir() {
-        std::fs::create_dir_all(&dir).ok();
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("Save file")
+        .set_file_name(&name);
+    if let Some(dir) = dialog_dir() {
         dialog = dialog.set_directory(dir);
     }
     if let Some(window) = app.get_webview_window("main") {
@@ -118,18 +130,20 @@ fn prompt_for_location(app: &AppHandle, staged: PathBuf) {
     }
 
     let app = app.clone();
-    dialog.save_file(move |chosen| match chosen.and_then(|p| p.into_path().ok()) {
-        Some(target) => {
-            std::thread::spawn(move || match relocate(&staged, &target) {
-                Ok(()) => notify(&app, &format!("Saved to {}", pretty(&target))),
-                Err(e) => {
-                    eprintln!("walz: could not save download to {}: {e}", target.display());
-                    notify(&app, &format!("Could not save {name}"));
-                }
-            });
-        }
-        None => discard(&staged),
-    });
+    dialog.save_file(
+        move |chosen| match chosen.and_then(|p| p.into_path().ok()) {
+            Some(target) => {
+                std::thread::spawn(move || match relocate(&staged, &target) {
+                    Ok(()) => notify(&app, &format!("Saved to {}", pretty(&target))),
+                    Err(e) => {
+                        eprintln!("walz: could not save download to {}: {e}", target.display());
+                        notify(&app, &format!("Could not save {name}"));
+                    }
+                });
+            }
+            None => discard(&staged),
+        },
+    );
 }
 
 /// Rename when possible, copy when the target is on a different filesystem.
@@ -191,7 +205,9 @@ fn notify(app: &AppHandle, body: &str) {
 }
 
 fn ask_location_path() -> PathBuf {
-    crate::profile::get().config_dir.join("ask-download-location")
+    crate::profile::get()
+        .config_dir
+        .join("ask-download-location")
 }
 
 /// Read the persisted toggle. Call before the tray menu is built: `build_menu`

@@ -8,7 +8,7 @@
 use std::sync::{Mutex, OnceLock};
 
 use tauri::{AppHandle, Emitter};
-use url::Url;
+use url::{form_urlencoded, Url};
 
 /// The URL this process was launched with, or the last one a second launch
 /// handed over. Taken by the injected script once it is ready to navigate.
@@ -25,27 +25,34 @@ pub fn launch_url() -> Option<&'static str> {
     LAUNCH_URL.get()?.as_deref()
 }
 
-pub fn set_pending(url: String) {
-    if let Ok(mut pending) = PENDING.lock() {
-        *pending = Some(url);
-    }
-}
-
 pub fn take_pending() -> Option<String> {
     PENDING.lock().ok()?.take()
 }
 
-/// Route a link that arrived after startup. The page is already loaded, so the
-/// injected script can navigate straight away; the launch-time link goes through
-/// `take_pending` instead, since nothing listens for events yet when the app
-/// starts.
-pub fn handle(app: &AppHandle, raw: &str) {
-    match to_web_url(raw) {
-        Some(target) => {
-            let _ = app.emit("open-url", target);
+/// Park the link this process was launched with. Nothing listens for events
+/// until the injected script runs, so it waits to be collected.
+pub fn park(raw: &str) {
+    if let Some(target) = translate(raw) {
+        if let Ok(mut pending) = PENDING.lock() {
+            *pending = Some(target);
         }
-        None => eprintln!("walz: don't know how to open {raw}"),
     }
+}
+
+/// Route a link that arrived after startup, from a launch that handed off to
+/// this instance. The page is already loaded, so it can navigate straight away.
+pub fn handle(app: &AppHandle, raw: &str) {
+    if let Some(target) = translate(raw) {
+        let _ = app.emit("open-url", target);
+    }
+}
+
+fn translate(raw: &str) -> Option<String> {
+    let target = to_web_url(raw);
+    if target.is_none() {
+        eprintln!("walz: don't know how to open {raw}");
+    }
+    target
 }
 
 /// Translate a click-to-chat link into the web.whatsapp.com URL that opens it.
@@ -107,31 +114,22 @@ fn send_url(phone: Option<&str>, text: Option<&str>) -> Option<String> {
         return None;
     }
 
-    let mut out = format!("https://web.whatsapp.com/send?phone={digits}");
+    let mut params = vec![("phone", digits.as_str())];
     if let Some(text) = text.filter(|text| !text.is_empty()) {
-        out.push_str("&text=");
-        out.push_str(&encode(text));
+        params.push(("text", text));
     }
-    Some(out)
+    Some(web_url("send", &params))
 }
 
 fn invite_url(code: &str) -> String {
-    format!("https://web.whatsapp.com/accept?code={}", encode(code))
+    web_url("accept", &[("code", code)])
 }
 
-/// Percent-encode everything outside the unreserved set. Small enough to spell
-/// out, and it keeps the query we build unambiguous.
-fn encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.as_bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(*byte as char)
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
+fn web_url(path: &str, params: &[(&str, &str)]) -> String {
+    let query = form_urlencoded::Serializer::new(String::new())
+        .extend_pairs(params)
+        .finish();
+    format!("https://web.whatsapp.com/{path}?{query}")
 }
 
 #[cfg(test)]
@@ -152,8 +150,8 @@ mod tests {
     #[test]
     fn encodes_prefilled_text() {
         assert_eq!(
-            to_web_url("https://wa.me/1555?text=hi+there"),
-            Some("https://web.whatsapp.com/send?phone=1555&text=hi%20there".to_string())
+            to_web_url("https://wa.me/1555?text=hi%20there%20%26%20now"),
+            Some("https://web.whatsapp.com/send?phone=1555&text=hi+there+%26+now".to_string())
         );
     }
 

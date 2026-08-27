@@ -16,11 +16,13 @@ use std::io::{Read, Write};
 use std::os::linux::net::SocketAddrExt;
 use std::os::unix::net::{SocketAddr, UnixListener, UnixStream};
 use std::path::Path;
+use std::time::Duration;
 
 use tauri::AppHandle;
 
 const WAKE: &[u8] = b"walz-show";
 const MAX_MESSAGE: u64 = 8 * 1024;
+const READ_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub enum Instance {
     /// This process owns the profile. Hold the listener for the app's lifetime;
@@ -74,8 +76,10 @@ pub fn serve(listener: UnixListener, app: AppHandle) {
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };
 
-            // Cap the read: the peer is another walz, but a stuck or hostile
-            // writer should not be able to grow this buffer without bound.
+            // The message is now variable-length, so the read runs to EOF -- and
+            // this loop is sequential, so a peer that connects and goes quiet
+            // would strand every later wake-up. Bound it in both directions.
+            let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
             let mut message = Vec::new();
             if stream.take(MAX_MESSAGE).read_to_end(&mut message).is_err() {
                 continue;
