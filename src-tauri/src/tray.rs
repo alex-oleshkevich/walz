@@ -84,6 +84,14 @@ fn build_menu<M: Manager<tauri::Wry>>(app: &M) -> Result<Menu<tauri::Wry>, tauri
         DND_ENABLED.load(Ordering::Relaxed),
         None::<&str>,
     )?;
+    let ask_download = CheckMenuItem::with_id(
+        app,
+        "ask-download-location",
+        "Ask where to save files",
+        true,
+        crate::downloads::ASK_LOCATION.load(Ordering::Relaxed),
+        None::<&str>,
+    )?;
     let sep2 = PredefinedMenuItem::separator(app)?;
 
     // Built with the `devtools` cargo feature so this works in release builds
@@ -100,6 +108,7 @@ fn build_menu<M: Manager<tauri::Wry>>(app: &M) -> Result<Menu<tauri::Wry>, tauri
             &hide,
             &sep1,
             &dnd,
+            &ask_download,
             &sep2,
             &devtools,
             &sep3,
@@ -137,6 +146,9 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
         }
         "dnd" => {
             crate::commands::toggle_dnd(app);
+        }
+        "ask-download-location" => {
+            crate::downloads::toggle_ask_location(app);
         }
         "devtools" => {
             if let Some(window) = app.get_webview_window("main") {

@@ -32,7 +32,7 @@ fn config_dir() -> PathBuf {
     crate::profile::get().config_dir.clone()
 }
 
-fn notification_icon_path() -> PathBuf {
+pub fn notification_icon_path() -> PathBuf {
     let path = crate::profile::get().data_dir.join("notification-icon.png");
     if !path.exists() {
         let _ = fs::write(&path, ICON_BYTES);

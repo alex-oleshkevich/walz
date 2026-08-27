@@ -1,4 +1,5 @@
 mod commands;
+mod downloads;
 pub mod profile;
 #[cfg(target_os = "linux")]
 mod secrets;
@@ -11,7 +12,6 @@ use tauri::{
     webview::DownloadEvent, DragDropEvent, Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
     WindowEvent, Theme,
 };
-use tauri_plugin_notification::NotificationExt;
 
 const INIT_SCRIPT: &str = include_str!("../../src/injection.js");
 const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -38,6 +38,13 @@ pub fn run() {
     // Restore Do Not Disturb before the tray builds its menu: build_menu snapshots
     // DND_ENABLED into the CheckMenuItem, so this must happen first.
     commands::DND_ENABLED.store(commands::load_dnd(), std::sync::atomic::Ordering::Relaxed);
+    downloads::ASK_LOCATION.store(
+        downloads::load_ask_location(),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+
+    // Drop staged files left behind by a crash mid-download.
+    downloads::clean_stage_root();
 
     // Claim the profile before touching the WebKit data directory: a second
     // instance sharing it can corrupt the stored session.
@@ -59,6 +66,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -88,53 +96,14 @@ pub fn run() {
             .on_download(move |webview, event| {
                 match event {
                     DownloadEvent::Requested { url, destination } => {
-                        let filename = commands::PENDING_DOWNLOAD_NAME
-                            .lock()
-                            .ok()
-                            .and_then(|mut g| g.take())
-                            .map(std::ffi::OsString::from)
-                            .or_else(|| {
-                                destination
-                                    .file_name()
-                                    .filter(|n| *n != "download")
-                                    .map(|n| n.to_os_string())
-                            })
-                            .or_else(|| {
-                                url.path_segments()
-                                    .and_then(|mut s| s.next_back())
-                                    .filter(|s| !s.is_empty() && *s != "download")
-                                    .map(std::ffi::OsString::from)
-                            })
-                            .unwrap_or_else(|| std::ffi::OsString::from("download"));
-                        if let Some(dirs) = directories::UserDirs::new() {
-                            if let Some(download_dir) = dirs.download_dir() {
-                                let walz_dir = download_dir.join("Walz");
-                                std::fs::create_dir_all(&walz_dir).ok();
-                                *destination = walz_dir.join(filename);
-                            }
-                        }
-                        true
+                        downloads::on_requested(&url, destination);
                     }
-                    DownloadEvent::Finished { success, .. } => {
-                        // This bypasses send_notification's own DND check, so it
-                        // needs its own -- previously a completed download always
-                        // notified even with Do Not Disturb on.
-                        let dnd = commands::DND_ENABLED.load(std::sync::atomic::Ordering::Relaxed);
-                        if success && !dnd {
-                            let icon_path = profile::get().data_dir.join("notification-icon.png");
-                            let _ = webview
-                                .app_handle()
-                                .notification()
-                                .builder()
-                                .title("Download Complete")
-                                .body("File downloaded successfully")
-                                .icon(icon_path.to_string_lossy())
-                                .show();
-                        }
-                        true
+                    DownloadEvent::Finished { path, success, .. } => {
+                        downloads::on_finished(webview.app_handle(), path, success);
                     }
-                    _ => true,
+                    _ => {}
                 }
+                true
             });
 
             if native_dnd {
