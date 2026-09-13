@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
+#[cfg(not(target_os = "linux"))]
 use tauri_plugin_notification::NotificationExt;
 use url::Url;
 
@@ -190,18 +191,34 @@ fn pretty(path: &Path) -> String {
 
 /// Download notifications bypass `commands::send_notification`, so they have to
 /// honour Do Not Disturb themselves.
-fn notify(app: &AppHandle, body: &str) {
+fn notify(_app: &AppHandle, body: &str) {
     if crate::commands::DND_ENABLED.load(Ordering::Relaxed) {
         return;
     }
     let icon_path = crate::commands::notification_icon_path();
-    let _ = app
-        .notification()
-        .builder()
-        .title("Download Complete")
-        .body(body)
-        .icon(icon_path.to_string_lossy())
-        .show();
+
+    #[cfg(target_os = "linux")]
+    {
+        let body = body.to_string();
+        std::thread::spawn(move || {
+            let _ = crate::commands::linux_notification()
+                .summary("Download Complete")
+                .body(&body)
+                .icon(&icon_path.to_string_lossy())
+                .show();
+        });
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = _app
+            .notification()
+            .builder()
+            .title("Download Complete")
+            .body(body)
+            .icon(icon_path.to_string_lossy())
+            .show();
+    }
 }
 
 fn ask_location_path() -> PathBuf {

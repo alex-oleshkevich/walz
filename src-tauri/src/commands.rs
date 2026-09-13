@@ -48,6 +48,15 @@ pub fn notification_icon_path() -> PathBuf {
     path
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) fn linux_notification() -> notify_rust::Notification {
+    let mut notification = notify_rust::Notification::new();
+    notification.hint(notify_rust::Hint::DesktopEntry(
+        env!("CARGO_PKG_NAME").to_string(),
+    ));
+    notification
+}
+
 #[tauri::command]
 pub async fn send_notification(
     app: AppHandle,
@@ -70,7 +79,7 @@ pub async fn send_notification(
         let app_clone = app.clone();
 
         std::thread::spawn(move || {
-            let result = notify_rust::Notification::new()
+            let result = linux_notification()
                 .summary(&title)
                 .body(&body)
                 .icon(&icon_path.to_string_lossy())
@@ -354,4 +363,20 @@ pub async fn delete_secret(key: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn update_mpris_status(_status: String) -> Result<(), String> {
     Ok(())
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linux_notifications_include_desktop_entry() {
+        let notification = linux_notification();
+        let desktop_entry = notification.hints.iter().find_map(|hint| match hint {
+            notify_rust::Hint::DesktopEntry(value) => Some(value.as_str()),
+            _ => None,
+        });
+
+        assert_eq!(desktop_entry, Some("walz"));
+    }
 }
