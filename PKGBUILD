@@ -1,6 +1,6 @@
 # Maintainer: Alex Oleshkevich <alex.oleshkevich@gmail.com>
 pkgname=walz
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc="WhatsApp desktop client for Linux built with Tauri"
 arch=('x86_64')
