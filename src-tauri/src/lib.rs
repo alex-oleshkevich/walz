@@ -9,6 +9,7 @@ mod secrets;
 #[cfg(target_os = "linux")]
 mod single_instance;
 mod theme;
+mod transcription;
 mod tray;
 
 use tauri::{
@@ -220,6 +221,8 @@ pub fn run() {
             commands::get_zoom,
             commands::save_zoom,
             commands::get_clipboard_files,
+            transcription::transcribe_audio,
+            transcription::translate_transcript,
             #[cfg(target_os = "linux")]
             commands::store_secret,
             #[cfg(target_os = "linux")]

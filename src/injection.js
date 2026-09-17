@@ -3,6 +3,28 @@
 
   let dndEnabled = false;
   let replayingClipboardPaste = false;
+  let pendingAudioCapture = null;
+
+  const originalMediaPlay = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function (...args) {
+    const capture = pendingAudioCapture;
+    const url = this.currentSrc || this.src;
+    if (capture && url?.startsWith("blob:")) {
+      if (capture.url && capture.url !== url) return originalMediaPlay.apply(this, args);
+      if (!capture.started) {
+        capture.started = true;
+        capture.url = url;
+        fetch(url)
+          .then((response) => {
+            if (!response.ok) throw new Error("Could not read the voice message.");
+            return response.blob();
+          })
+          .then(capture.resolve, capture.reject);
+      }
+      return Promise.resolve();
+    }
+    return originalMediaPlay.apply(this, args);
+  };
 
   // ============================================
   // NOTIFICATION INTERCEPTION
@@ -411,6 +433,498 @@
   }
 
   // ============================================
+  // VOICE MESSAGE TRANSCRIPTION
+  // ============================================
+  const AUDIO_HINTS =
+    '[data-icon="ptt-status"], [aria-label="Voice message"], [aria-label="Play voice message"], audio';
+  const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+  let menuMessage = null;
+  let menuExpiresAt = 0;
+  const inlineTranslations = new WeakMap();
+
+  function isAudioMessage(row) {
+    return !!row.querySelector(AUDIO_HINTS);
+  }
+
+  function transportButton(row) {
+    const buttons = [...row.querySelectorAll("button")];
+    const slider = row.querySelector('[role="slider"]');
+    if (slider) {
+      const before = buttons.filter(
+        (button) => button.compareDocumentPosition(slider) & Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+      if (before.length) return before[before.length - 1];
+    }
+    return buttons.find((button) => !/\d\s*[.,]?\d*\s*[x×]/i.test(button.textContent || ""));
+  }
+
+  function isDownloadButton(button) {
+    return !!button?.querySelector('[data-icon*="download"]') ||
+      /download/i.test(`${button?.getAttribute("aria-label") || ""} ${button?.textContent || ""}`);
+  }
+
+  function press(button) {
+    const options = { bubbles: true, cancelable: true, composed: true };
+    if (window.PointerEvent) {
+      button.dispatchEvent(new PointerEvent("pointerdown", options));
+      button.dispatchEvent(new PointerEvent("pointerup", options));
+    }
+    button.dispatchEvent(new MouseEvent("mousedown", options));
+    button.dispatchEvent(new MouseEvent("mouseup", options));
+    button.click();
+  }
+
+  async function waitForPlayButton(row) {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const button = transportButton(row);
+      if (button && !isDownloadButton(button)) return button;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    throw new Error("WhatsApp could not download this voice message.");
+  }
+
+  async function audioBlobFor(row, setStatus) {
+    const audio = row.querySelector("audio");
+    if (audio?.src?.startsWith("blob:")) {
+      try {
+        const response = await fetch(audio.src);
+        if (response.ok) return response.blob();
+      } catch {}
+    }
+
+    let button = transportButton(row);
+    if (!button) throw new Error("Could not find this message's audio control.");
+    if (isDownloadButton(button)) {
+      setStatus("Downloading voice message…");
+      press(button);
+      button = await waitForPlayButton(row);
+    }
+
+    setStatus("Reading voice message…");
+    let timeout;
+    const blob = new Promise((resolve, reject) => {
+      timeout = setTimeout(() => reject(new Error("WhatsApp did not prepare the audio.")), 30000);
+      pendingAudioCapture = { resolve, reject, started: false };
+    });
+    try {
+      press(button);
+      return await blob;
+    } finally {
+      clearTimeout(timeout);
+      // WhatsApp can call play after setting src, so keep playback suppressed
+      // briefly after the Blob is captured.
+      const capture = pendingAudioCapture;
+      setTimeout(() => {
+        if (pendingAudioCapture === capture) pendingAudioCapture = null;
+      }, 1500);
+    }
+  }
+
+  function audioFormat(blob) {
+    const type = blob.type.toLowerCase();
+    const name = blob.name?.toLowerCase() || "";
+    const extension = name.split(".").pop();
+    if (type.includes("ogg") || type.includes("opus")) return "ogg";
+    if (type.includes("mpeg")) return "mp3";
+    if (type.includes("wav")) return "wav";
+    if (type.includes("webm")) return "webm";
+    if (type.includes("mp4")) return "mp4";
+    if (type.includes("flac")) return "flac";
+    if (["ogg", "opus", "mp3", "wav", "m4a", "mp4", "webm", "flac", "aac"].includes(extension)) {
+      return extension === "opus" ? "ogg" : extension;
+    }
+    return "ogg";
+  }
+
+  function audioBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",", 2)[1]);
+      reader.onerror = () => reject(new Error("Could not read the audio file."));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function showFormattedText(container, value) {
+    container.replaceChildren();
+    const blocks = value.trim().split(/\n\s*\n/);
+    for (const block of blocks) {
+      const sentences = Intl.Segmenter
+        ? [...new Intl.Segmenter(undefined, { granularity: "sentence" }).segment(block)]
+            .map((part) => part.segment.trim()).filter(Boolean)
+        : [block.trim()];
+      let paragraph = "";
+      for (const sentence of sentences) {
+        if (paragraph && paragraph.length + sentence.length > 420) {
+          const element = document.createElement("p");
+          element.textContent = paragraph;
+          container.appendChild(element);
+          paragraph = "";
+        }
+        paragraph += `${paragraph ? " " : ""}${sentence}`;
+      }
+      if (paragraph) {
+        const element = document.createElement("p");
+        element.textContent = paragraph;
+        container.appendChild(element);
+      }
+    }
+  }
+
+  function messageTextElements(row) {
+    return [...row.querySelectorAll('span[data-testid="selectable-text"], span[data-testid$="caption selectable-text"]')].filter(
+      (element) => !element.closest('[data-testid="quoted-message"]') &&
+        !element.parentElement?.closest('span[data-testid="selectable-text"], span[data-testid$="caption selectable-text"]'),
+    );
+  }
+
+  function messageText(row) {
+    const elements = messageTextElements(row);
+    const read = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+      if (node.nodeName === "BR") return "\n";
+      if (node.nodeName === "IMG") return node.getAttribute("data-plain-text") || node.alt || "";
+      return [...node.childNodes].map(read).join("");
+    };
+    return elements.map(read).join("\n").trim();
+  }
+
+  async function translateMessageInline(row, text) {
+    let state = inlineTranslations.get(row);
+    if (state?.translation.isConnected) {
+      if (state.pending) return;
+      if (state.translated) {
+        state.originals.forEach((element) => element.classList.add("walz-original-hidden"));
+        state.translation.hidden = false;
+        state.toggle.textContent = "Show original";
+        return;
+      }
+    } else {
+      const originals = messageTextElements(row);
+      if (!originals.length) return;
+      const translation = originals[0].cloneNode(false);
+      translation.removeAttribute("data-testid");
+      translation.classList.add("walz-inline-translation");
+      translation.setAttribute("dir", "auto");
+      translation.hidden = true;
+      originals[0].after(translation);
+
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "walz-inline-toggle";
+      toggle.textContent = "Show original";
+      toggle.hidden = true;
+      translation.after(toggle);
+
+      const status = document.createElement("span");
+      status.className = "walz-inline-status";
+      status.setAttribute("role", "status");
+      toggle.after(status);
+      state = { originals, translation, toggle, status, pending: false, translated: false };
+      inlineTranslations.set(row, state);
+
+      toggle.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const showOriginal = toggle.textContent === "Show original";
+        originals.forEach((element) => element.classList.toggle("walz-original-hidden", !showOriginal));
+        translation.hidden = showOriginal;
+        toggle.textContent = showOriginal ? "Show translation" : "Show original";
+      });
+    }
+
+    state.pending = true;
+    state.status.textContent = "Translating…";
+    try {
+      const result = await window.__TAURI__.core.invoke("translate_transcript", {
+        text,
+        targetLanguage: "English",
+      });
+      if (!state.translation.isConnected) return;
+      state.translation.textContent = result;
+      state.translation.hidden = false;
+      state.originals.forEach((element) => element.classList.add("walz-original-hidden"));
+      state.toggle.textContent = "Show original";
+      state.toggle.hidden = false;
+      state.status.remove();
+      state.translated = true;
+    } catch (error) {
+      state.status.textContent = String(error);
+    } finally {
+      state.pending = false;
+    }
+  }
+
+  function createTranscriptionDialog(row) {
+    document.getElementById("walz-transcription-overlay")?.remove();
+    const overlay = document.createElement("div");
+    overlay.id = "walz-transcription-overlay";
+    overlay.innerHTML = `
+      <div class="walz-transcription-dialog" role="dialog" aria-modal="true" aria-labelledby="walz-transcription-title">
+        <header><h2 id="walz-transcription-title">Voice message</h2><button class="walz-close" type="button" aria-label="Close"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></header>
+        <div class="walz-toolbar" hidden>
+          <button class="walz-copy" type="button">Copy</button>
+          <div class="walz-translation-controls"><label for="walz-target-language">Translate to</label><input id="walz-target-language" value="English" maxlength="64"><button class="walz-translate" type="button">Translate</button></div>
+        </div>
+        <p class="walz-status" role="status">Getting audio…</p>
+        <div class="walz-result" hidden><div class="walz-transcript"></div><div class="walz-translation-result" hidden><div class="walz-translation-label">Translation</div><div class="walz-translated"></div></div></div>
+        <div class="walz-file-fallback" hidden><p>Choose the downloaded audio file to transcribe it.</p><input type="file" accept="audio/*,.ogg,.opus,.m4a,.mp3,.wav,.webm,.flac"></div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const close = () => {
+      overlay.remove();
+      document.removeEventListener("keydown", onEscape);
+    };
+    overlay.querySelector(".walz-close").addEventListener("click", close);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) close();
+    });
+    const onEscape = (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    };
+    document.addEventListener("keydown", onEscape);
+    const status = overlay.querySelector(".walz-status");
+    const fallback = overlay.querySelector(".walz-file-fallback");
+    const transcript = overlay.querySelector(".walz-transcript");
+    const translated = overlay.querySelector(".walz-translated");
+    let transcriptText = "";
+
+    async function transcribe(blob) {
+      if (!overlay.isConnected) return;
+      if (!blob.size || blob.size > MAX_AUDIO_BYTES) {
+        throw new Error("Audio must be smaller than 25 MB.");
+      }
+      status.textContent = "Transcribing…";
+      const audioBase64Data = await audioBase64(blob);
+      if (!overlay.isConnected) return;
+      const text = await window.__TAURI__.core.invoke("transcribe_audio", {
+        audioBase64: audioBase64Data,
+        format: audioFormat(blob),
+      });
+      transcriptText = text;
+      showFormattedText(transcript, text);
+      overlay.querySelector(".walz-result").hidden = false;
+      overlay.querySelector(".walz-toolbar").hidden = false;
+      status.hidden = true;
+    }
+
+    overlay.querySelector(".walz-copy").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(transcriptText);
+        const button = overlay.querySelector(".walz-copy");
+        button.textContent = "Copied";
+        setTimeout(() => { if (overlay.isConnected) button.textContent = "Copy"; }, 2000);
+      } catch {
+        status.hidden = false;
+        status.textContent = "Could not copy the transcript.";
+      }
+    });
+    overlay.querySelector(".walz-translate").addEventListener("click", async () => {
+      const button = overlay.querySelector(".walz-translate");
+      button.disabled = true;
+      status.hidden = false;
+      status.textContent = "Translating…";
+      try {
+        const text = await window.__TAURI__.core.invoke("translate_transcript", {
+          text: transcriptText,
+          targetLanguage: overlay.querySelector("#walz-target-language").value,
+        });
+        showFormattedText(translated, text);
+        overlay.querySelector(".walz-translation-result").hidden = false;
+        status.hidden = true;
+      } catch (error) {
+        status.textContent = String(error);
+      } finally {
+        button.disabled = false;
+      }
+    });
+    fallback.querySelector("input").addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      fallback.hidden = true;
+      try {
+        await transcribe(file);
+      } catch (error) {
+        status.hidden = false;
+        status.textContent = String(error);
+        fallback.hidden = false;
+      }
+    });
+
+    (async () => {
+      let blob;
+      try {
+        blob = await audioBlobFor(row, (message) => { status.textContent = message; });
+      } catch (error) {
+        status.hidden = false;
+        status.textContent = String(error);
+        fallback.hidden = false;
+        return;
+      }
+      try {
+        await transcribe(blob);
+      } catch (error) {
+        status.hidden = false;
+        status.textContent = String(error);
+      }
+    })();
+    overlay.querySelector(".walz-close").focus();
+  }
+
+  function addTranscribeMenuItem() {
+    if (!menuMessage?.isConnected || Date.now() > menuExpiresAt || !isAudioMessage(menuMessage)) return;
+    const items = [...document.querySelectorAll('[role="menuitem"], [role="button"]')];
+    const hasLabel = (item, label) =>
+      item.innerText?.trim() === label || item.textContent.trim().endsWith(label);
+    const download = items.find((item) => {
+      if (!hasLabel(item, "Download")) return false;
+      let parent = item.parentElement;
+      for (let level = 0; parent && level < 4; level++, parent = parent.parentElement) {
+        const entries = [...parent.querySelectorAll('[role="menuitem"], [role="button"]')];
+        if (entries.some((entry) => hasLabel(entry, "Reply")) &&
+            entries.some((entry) => hasLabel(entry, "React"))) return true;
+      }
+      return false;
+    });
+    if (!download || download.parentElement.querySelector(".walz-transcribe-menu-item")) return;
+    const row = menuMessage;
+    const item = download.cloneNode(true);
+    item.classList.add("walz-transcribe-menu-item");
+    item.setAttribute("aria-label", "Transcribe");
+    item.tabIndex = 0;
+    const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT);
+    let replacedLabel = false;
+    while (walker.nextNode()) {
+      if (walker.currentNode.textContent.trim() === "Download") {
+        walker.currentNode.textContent = "Transcribe";
+        replacedLabel = true;
+        break;
+      }
+    }
+    if (!replacedLabel) item.textContent = "Transcribe";
+    const icon = item.querySelector("svg");
+    if (icon) {
+      icon.innerHTML = '<path d="M7 3h8l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2Zm8 0v5h4M8 12h8M8 16h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>';
+    }
+    item.addEventListener("click", (event) => {
+      event.stopPropagation();
+      menuMessage = null;
+      document.body.click();
+      createTranscriptionDialog(row);
+    });
+    item.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        item.click();
+      }
+    });
+    download.after(item);
+  }
+
+  function addTranslateMenuItem() {
+    if (!menuMessage?.isConnected || Date.now() > menuExpiresAt || isAudioMessage(menuMessage)) return;
+    const row = menuMessage;
+    const text = messageText(row);
+    if (!text) return;
+    const menu = [...document.querySelectorAll('[role="menu"]')].find((element) => {
+      const labels = [...element.querySelectorAll('[role="menuitem"]')].map(
+        (item) => item.getAttribute("aria-label"),
+      );
+      return labels.includes("Reply") && labels.includes("React");
+    });
+    if (!menu || menu.querySelector(".walz-translate-menu-item")) return;
+    const anchor = ["Copy", "Download", "Reply"].map((label) =>
+      [...menu.querySelectorAll('[role="menuitem"]')].find(
+        (item) => item.getAttribute("aria-label") === label,
+      ),
+    ).find(Boolean);
+    if (!anchor) return;
+    const item = anchor.cloneNode(true);
+    item.classList.add("walz-translate-menu-item");
+    item.setAttribute("aria-label", "Translate");
+    item.tabIndex = 0;
+    const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      if (walker.currentNode.textContent.trim() === anchor.getAttribute("aria-label")) {
+        walker.currentNode.textContent = "Translate";
+        break;
+      }
+    }
+    const icon = item.querySelector("svg");
+    if (icon) icon.innerHTML = '<path d="M3 6h12M9 3v3m4 0c-.5 5-3.5 9-8 11m2-8c1.5 3 4 5.5 7 7M14 13h7m-3.5-3-4 11m4-11 4 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>';
+    item.addEventListener("click", (event) => {
+      event.stopPropagation();
+      menuMessage = null;
+      document.body.click();
+      translateMessageInline(row, text);
+    });
+    item.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        item.click();
+      }
+    });
+    anchor.after(item);
+  }
+
+  function addMessageMenuItem() {
+    addTranscribeMenuItem();
+    addTranslateMenuItem();
+  }
+
+  function setupTranscription() {
+    const style = document.createElement("style");
+    style.textContent = `
+      #walz-transcription-overlay{position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:16px;background:var(--WDS-background-dimmer,rgba(0,0,0,.32))}
+      #walz-transcription-overlay [hidden]{display:none!important}
+      .walz-transcription-dialog{box-sizing:border-box;display:flex;flex-direction:column;width:min(620px,100%);max-height:calc(100vh - 32px);padding:24px;border-radius:16px;background:var(--WDS-surface-elevated-default,var(--panel-background));color:var(--WDS-content-default,var(--primary));box-shadow:0 8px 32px rgba(0,0,0,.2);font:14px "Roboto Variable",Roboto,"Helvetica Neue",Helvetica,sans-serif}
+      .walz-transcription-dialog header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}
+      .walz-transcription-dialog h2{margin:0;font-size:20px;font-weight:500;line-height:28px}
+      .walz-transcription-dialog button,.walz-transcription-dialog input{font:inherit}
+      .walz-transcription-dialog button{border:0;cursor:pointer}
+      .walz-transcription-dialog button:disabled{opacity:.5;cursor:default}
+      .walz-transcription-dialog .walz-close{display:grid;place-items:center;width:32px;height:32px;padding:0;border-radius:50%;background:transparent;color:inherit}
+      .walz-transcription-dialog .walz-close:hover,.walz-transcription-dialog .walz-copy:hover{background:var(--WDS-surface-highlight,rgba(255,255,255,.1))}
+      .walz-toolbar{display:flex;align-items:center;gap:12px;padding-bottom:16px;border-bottom:1px solid var(--border-deeper,rgba(128,128,128,.2))}
+      .walz-copy{height:36px;padding:0 16px;border-radius:18px;background:var(--WDS-surface-elevated-emphasized,var(--panel-input-background));color:inherit;white-space:nowrap}
+      .walz-translation-controls{display:flex;align-items:center;gap:8px;margin-left:auto}
+      .walz-translation-controls label{color:var(--WDS-content-deemphasized,var(--secondary));white-space:nowrap}
+      .walz-translation-controls input{box-sizing:border-box;width:112px;height:36px;padding:0 10px;border:1px solid var(--input-border);border-radius:8px;outline:none;background:var(--WDS-surface-elevated-emphasized,var(--panel-input-background));color:inherit}
+      .walz-translation-controls input:focus{border-color:var(--WDS-accent,var(--input-border-active))}
+      .walz-translate{height:36px;padding:0 16px;border-radius:18px;background:var(--WDS-accent,#21c063);color:var(--WDS-content-on-accent,#0a0a0a);font-weight:500!important}
+      .walz-translate:hover{filter:brightness(1.08)}
+      .walz-status{margin:4px 0 16px;color:var(--WDS-content-deemphasized,var(--secondary))}
+      .walz-result{min-height:0;overflow:auto;padding:18px 2px 0;line-height:1.55;overflow-wrap:anywhere}
+      .walz-result p{margin:0 0 14px;white-space:pre-wrap}
+      .walz-translation-result{margin-top:20px;padding-top:18px;border-top:1px solid var(--border-deeper,rgba(128,128,128,.2))}
+      .walz-translation-label{margin-bottom:12px;color:var(--WDS-content-deemphasized,var(--secondary));font-size:13px;font-weight:500}
+      .walz-file-fallback{padding:12px 0}
+      .walz-file-fallback input{max-width:100%}
+      .walz-original-hidden,.walz-inline-translation[hidden],.walz-inline-toggle[hidden]{display:none!important}
+      .walz-inline-translation{white-space:pre-wrap;overflow-wrap:anywhere}
+      .walz-inline-toggle{display:block;margin:4px 0 0;padding:0;border:0;background:none;color:var(--WDS-accent,#21c063);font:500 12px "Roboto Variable",Roboto,"Helvetica Neue",Helvetica,sans-serif;cursor:pointer}
+      .walz-inline-toggle:hover{text-decoration:underline}
+      .walz-inline-status{display:block;margin-top:4px;color:var(--WDS-content-deemphasized,var(--secondary));font:12px "Roboto Variable",Roboto,"Helvetica Neue",Helvetica,sans-serif;overflow-wrap:anywhere}
+      @media(max-width:560px){.walz-toolbar{align-items:stretch;flex-wrap:wrap}.walz-translation-controls{margin-left:0;flex:1}.walz-translation-controls input{min-width:0;flex:1}}
+    `;
+    document.head.appendChild(style);
+    document.addEventListener("pointerdown", (event) => {
+      const row = event.target.closest('div[role="row"], div[data-id]');
+      if (row) {
+        menuMessage = row;
+        menuExpiresAt = Date.now() + 30000;
+        requestAnimationFrame(addMessageMenuItem);
+      } else if (!event.target.closest('[role="menu"], .walz-transcribe-menu-item, .walz-translate-menu-item')) {
+        menuMessage = null;
+      }
+    }, true);
+    new MutationObserver(() => {
+      if (menuMessage) requestAnimationFrame(addMessageMenuItem);
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+
+  // ============================================
   // INITIALIZATION
   // ============================================
   function init() {
@@ -419,6 +933,7 @@
     loadCustomCSS();
     loadZoom();
     openPendingLink();
+    setupTranscription();
   }
 
   // WhatsApp Web routes /send and /accept itself, so a click-to-chat link is a

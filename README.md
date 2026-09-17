@@ -18,6 +18,10 @@ Images and files copied from a file manager can be pasted or dragged straight in
 
 ## Installation
 
+Audio messages need GStreamer's Opus decoder. On Arch Linux, install
+`gst-plugins-base` (for example, `sudo pacman -S gst-plugins-base`) and restart
+Walz after installing it. The included `PKGBUILD` installs this dependency.
+
 ### Quick install (prebuilt binary)
 
 ```sh
@@ -65,6 +69,20 @@ walz --minimized         # start minimized to the tray
 Data lives in `~/.local/share/walz/` and config in `~/.config/walz/` (or
 `~/.local/share/walz/profiles/<name>/` and `~/.config/walz/profiles/<name>/`
 for named profiles).
+
+### Voice transcription
+
+Set `OPENROUTER_API_KEY` in Walz's environment before starting it. Open a voice
+message's menu and choose **Transcribe**. The dialog shows the transcript and
+can translate it into a language you enter. It uses Whisper Large V3 Turbo for
+transcription and Gemini 2.5 Flash Lite for translation. If WhatsApp cannot
+expose the audio directly, the dialog lets you choose the downloaded audio
+file. Asking WhatsApp to prepare a voice message may mark it as played.
+
+To translate a text message or media caption, choose **Translate** from its
+menu. The English translation replaces the displayed text in that message;
+**Show original** switches back. This uses the same OpenRouter key and
+translation model.
 
 ## License
 

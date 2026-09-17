@@ -1,6 +1,6 @@
 # Maintainer: Alex Oleshkevich <alex.oleshkevich@gmail.com>
 pkgname=walz
-pkgver=0.2.1
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="WhatsApp desktop client for Linux built with Tauri"
 arch=('x86_64')
@@ -8,6 +8,7 @@ url="https://github.com/alex-oleshkevich/walz"
 license=('MIT')
 depends=(
     'webkit2gtk-4.1'
+    'gst-plugins-base'
     'gst-plugins-good'
     'gtk3'
     'libayatana-appindicator'
