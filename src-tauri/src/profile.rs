@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 static PROFILE: OnceLock<Profile> = OnceLock::new();
 
 #[derive(Parser, Debug)]
-#[command(name = "walz", about = "WhatsApp desktop client for Linux")]
+#[command(name = "walz", about = "WhatsApp desktop client for Linux", version)]
 pub struct Args {
     /// Profile name to use (creates separate session)
     #[arg(short, long)]
